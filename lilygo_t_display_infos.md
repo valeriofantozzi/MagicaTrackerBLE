@@ -4,6 +4,8 @@
 
 Il **LILYGO T-Display** è una scheda di sviluppo ESP32 con display TFT integrato, progettata per applicazioni entry-level e progetti IoT portatili.
 
+⚠️ **IMPORTANTE**: Esistono diverse versioni del T-Display (v1, v2, ecc.) con differenze hardware. Verifica la tua versione controllando il codice del progetto e gli schematici.
+
 ### Caratteristiche Principali
 
 - **Microcontrollore**: ESP32 Xtensa dual-core LX6 microprocessor
@@ -238,9 +240,14 @@ TFT_MOSI: GPIO 19
 TFT_SCLK: GPIO 18
 TFT_CS:   GPIO 5
 TFT_DC:   GPIO 16
-TFT_RST:  N/A (non connesso)
+TFT_RST:  GPIO 23 (alcune versioni) / N/A (altre versioni)
 TFT_BL:   GPIO 4
 ```
+
+**⚠️ Nota Versioni**: Il pin TFT_RST può variare tra versioni:
+
+- **Versione con TFT_RST connesso**: GPIO 23
+- **Versione senza TFT_RST**: N/A (non connesso)
 
 ### Pulsanti
 
@@ -294,7 +301,11 @@ TFT_BL:   GPIO 4
 
 ### Configurazione TFT_eSPI
 
-Per utilizzare correttamente la libreria TFT_eSPI, è necessario modificare il file `User_Setup_Select.h`:
+Per utilizzare correttamente la libreria TFT_eSPI, è necessario modificare il file `User_Setup_Select.h`.
+
+**⚠️ IMPORTANTE**: La configurazione varia a seconda della versione del T-Display!
+
+#### Per Versioni SENZA TFT_RST connesso (v1):
 
 ```cpp
 // Abilitare la configurazione per LILYGO T-Display
@@ -308,7 +319,33 @@ Per utilizzare correttamente la libreria TFT_eSPI, è necessario modificare il f
 #define TFT_SCLK 18
 #define TFT_CS    5
 #define TFT_DC   16
-#define TFT_RST  -1
+#define TFT_RST  -1  // Non connesso
+#define TFT_BL    4
+
+#define LOAD_GLCD
+#define LOAD_FONT2
+#define LOAD_FONT4
+#define LOAD_FONT6
+#define LOAD_FONT7
+#define LOAD_FONT8
+#define SMOOTH_FONT
+```
+
+#### Per Versioni CON TFT_RST connesso (v2+):
+
+```cpp
+// Abilitare la configurazione per LILYGO T-Display
+#define USER_SETUP_LOADED
+#define ILI9341_DRIVER  // Anche se è ST7789, questa configurazione funziona
+#define TFT_WIDTH  135
+#define TFT_HEIGHT 240
+
+#define TFT_MISO -1
+#define TFT_MOSI 19
+#define TFT_SCLK 18
+#define TFT_CS    5
+#define TFT_DC   16
+#define TFT_RST   23  // Connesso a GPIO 23
 #define TFT_BL    4
 
 #define LOAD_GLCD
@@ -414,7 +451,20 @@ void loop() {
 
 ## 📅 Versioni e Varianti
 
-- **T-Display**: Versione base con ESP32
+### Versioni del T-Display Base (ESP32)
+
+- **T-Display v1**: Versione originale, TFT_RST non connesso (-1)
+- **T-Display v2+**: Versioni successive, TFT_RST connesso a GPIO 23
+
+### Come Identificare la Versione
+
+Controlla il codice del tuo progetto:
+
+- Se vedi `TFT_RST = 23` → Versione con RST connesso
+- Se vedi `TFT_RST = -1` → Versione senza RST connesso
+
+### Altre Varianti LILYGO
+
 - **T-Display S3**: Versione con ESP32-S3 e display più grande
 - **T-Display AMOLED**: Versione con display AMOLED
 - **T-Display S3 Pro**: Versione avanzata con più funzionalità
