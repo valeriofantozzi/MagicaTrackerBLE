@@ -239,7 +239,7 @@ void setup() {
     Serial.println("✓ Pulsanti inizializzati");
     Serial.println("✓ Premi BUTTON1 (pin 35) per BLE ↔ DEEP SLEEP");
     Serial.println("✓ BLE inizialmente DISABILITATO (no advertising)");
-    Serial.printf("✓ AUTO SLEEP: entra in deep sleep dopo %d secondi di inattività\n", AUTO_SLEEP_TIMEOUT / 1000);
+    Serial.printf("✓ AUTO SLEEP: entra in deep sleep dopo %d secondi di inattività (solo se BLE disabilitato)\n", AUTO_SLEEP_TIMEOUT / 1000);
     Serial.println("✓ DEEP SLEEP: consumo ~0.15mA vs ~60mA attivo\n");
   } else {
     Serial.println("🔋 Modalità DEEP SLEEP attiva - Andando immediatamente in sleep...\n");
@@ -282,31 +282,36 @@ void loop() {
     }
   }
 
-  // Controllo timeout auto sleep
-  if (currentTime - lastActivityTime >= AUTO_SLEEP_TIMEOUT) {
+  // Controllo timeout auto sleep (solo se BLE è disabilitato)
+  if (!bleEnabled && currentTime - lastActivityTime >= AUTO_SLEEP_TIMEOUT) {
     Serial.println("⏰ Timeout inattività raggiunto - Entrando in DEEP SLEEP automatico...");
     enterDeepSleep();
     return;
   }
 
-  // Countdown negli ultimi 10 secondi
-  unsigned long timeSinceActivity = currentTime - lastActivityTime;
-  unsigned long timeToSleep = AUTO_SLEEP_TIMEOUT - timeSinceActivity;
+  // Countdown negli ultimi 10 secondi (solo se BLE è disabilitato)
+  if (!bleEnabled) {
+    unsigned long timeSinceActivity = currentTime - lastActivityTime;
+    unsigned long timeToSleep = AUTO_SLEEP_TIMEOUT - timeSinceActivity;
 
-  if (timeToSleep <= 10000) {  // Ultimi 10 secondi
-    if (!countdownActive) {
-      countdownActive = true;
-      Serial.printf("⏰ Auto sleep tra %lu secondi - Premi BUTTON1 per annullare\n", timeToSleep / 1000);
-      lastCountdownTime = currentTime;
-    } else if (currentTime - lastCountdownTime >= 1000) {  // Aggiorna ogni secondo
-      unsigned long secondsLeft = timeToSleep / 1000;
-      if (secondsLeft > 0) {
-        Serial.printf("⏰ %lu...\n", secondsLeft);
+    if (timeToSleep <= 10000) {  // Ultimi 10 secondi
+      if (!countdownActive) {
+        countdownActive = true;
+        Serial.printf("⏰ Auto sleep tra %lu secondi - Premi BUTTON1 per annullare\n", timeToSleep / 1000);
+        lastCountdownTime = currentTime;
+      } else if (currentTime - lastCountdownTime >= 1000) {  // Aggiorna ogni secondo
+        unsigned long secondsLeft = timeToSleep / 1000;
+        if (secondsLeft > 0) {
+          Serial.printf("⏰ %lu...\n", secondsLeft);
+        }
+        lastCountdownTime = currentTime;
       }
-      lastCountdownTime = currentTime;
+    } else {
+      countdownActive = false;  // Reset se siamo usciti dal countdown
     }
   } else {
-    countdownActive = false;  // Reset se siamo usciti dal countdown
+    // Se BLE è attivo, reset countdown per sicurezza
+    countdownActive = false;
   }
 
   // Heartbeat se BLE attivo e connesso
