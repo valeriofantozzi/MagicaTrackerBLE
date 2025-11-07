@@ -44,7 +44,7 @@ RTC_DATA_ATTR bool deepSleepMode = false;  // Stato persistente attraverso deep 
 RTC_DATA_ATTR int bootCount = 0;           // Contatore boot per debug
 
 // ========== TIMEOUT AUTO SLEEP ==========
-#define AUTO_SLEEP_TIMEOUT 30000  // 30 secondi di inattività prima di deep sleep
+#define AUTO_SLEEP_TIMEOUT 10000  // x secondi di inattività prima di deep sleep
 unsigned long lastActivityTime = 0;  // Timestamp ultimo input utente
 unsigned long lastCountdownTime = 0; // Per evitare spam countdown
 bool countdownActive = false;       // Flag per countdown attivo
@@ -165,9 +165,7 @@ void enterDeepSleep() {
   // - Premuto: pin LOW → wake up
   esp_sleep_enable_ext0_wakeup(GPIO_NUM_35, 0);  // Wake on LOW (pulsante premuto)
 
-  // Configura RTC GPIO per deep sleep: pull-up per tenere HIGH quando non premuto
-  rtc_gpio_pullup_en(GPIO_NUM_35);   // Pull-up per stabilità (HIGH = non premuto)
-  rtc_gpio_pulldown_dis(GPIO_NUM_35); // Disabilita pull-down
+  // Nota: Non configurare RTC GPIO aggiuntive per evitare conflitti con altre librerie
 
   deepSleepMode = true;  // Salva stato in RTC memory
   Serial.println("✅ Wake up configurato su GPIO 35 (BUTTON1) - Wake on LOW");
@@ -234,13 +232,13 @@ void setup() {
 
   // Inizializza pulsanti solo se non siamo in deep sleep mode
   if (!deepSleepMode) {
-    button1.begin();
-    button2.begin();
-    Serial.println("✓ Pulsanti inizializzati");
+  button1.begin();
+  button2.begin();
+  Serial.println("✓ Pulsanti inizializzati");
     Serial.println("✓ Premi BUTTON1 (pin 35) per BLE ↔ DEEP SLEEP");
     Serial.println("✓ BLE inizialmente DISABILITATO (no advertising)");
     Serial.printf("✓ AUTO SLEEP: entra in deep sleep dopo %d secondi di inattività (solo se BLE disabilitato)\n", AUTO_SLEEP_TIMEOUT / 1000);
-    Serial.println("✓ DEEP SLEEP: consumo ~0.15mA vs ~60mA attivo\n");
+    Serial.println("✓ DEEP SLEEP\n");
   } else {
     Serial.println("🔋 Modalità DEEP SLEEP attiva - Andando immediatamente in sleep...\n");
   }
