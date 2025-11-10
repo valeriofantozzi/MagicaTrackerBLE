@@ -74,6 +74,13 @@ private:
   unsigned long lastUIUpdate;
   bool uiNeedsRedraw;
   
+  // Variabili per tracking stato (ottimizzazione refresh)
+  bool lastBleEnabled;
+  bool lastDeviceConnected;
+  unsigned long lastTimeToSleep;
+  bool countdownWasVisible;
+  unsigned long lastCountdownUpdate;
+  
   // Variabili per animazioni
   unsigned long lastHeartbeat;
   bool heartbeatState;
@@ -90,6 +97,12 @@ private:
   void drawConnectionStatus(bool bleEnabled, bool deviceConnected);
   void drawCountdown(bool bleEnabled, unsigned long timeToSleep);
   void drawFooter();
+  
+  // Funzioni helper per refresh parziali (ottimizzazione animazioni)
+  void updateHeartbeatText();
+  void updateSearchDots();
+  void updateCountdownText(unsigned long timeToSleep);
+  void updateCountdownProgress(unsigned long timeToSleep);
   
   // Funzioni grafiche avanzate
   void drawBluetoothIcon(int x, int y, uint16_t color, bool filled = true);
@@ -122,6 +135,11 @@ DisplayManager::DisplayManager()
   : tft(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST),
     lastUIUpdate(0),
     uiNeedsRedraw(true),
+    lastBleEnabled(false),
+    lastDeviceConnected(false),
+    lastTimeToSleep(0),
+    countdownWasVisible(false),
+    lastCountdownUpdate(0),
     lastHeartbeat(0),
     heartbeatState(false),
     lastSearchDot(0),
@@ -141,9 +159,14 @@ void DisplayManager::init() {
   tft.setRotation(2);  // Portrait invertito (180 gradi)
   tft.fillScreen(COLOR_BG_DARK);
   
-  // Reset variabili animazioni
+  // Reset variabili animazioni e stato
   uiNeedsRedraw = true;
   lastUIUpdate = 0;
+  lastBleEnabled = false;
+  lastDeviceConnected = false;
+  lastTimeToSleep = 0;
+  countdownWasVisible = false;
+  lastCountdownUpdate = 0;
   heartbeatState = false;
   searchDotCount = 0;
   pulseRadius = 4;
@@ -179,29 +202,35 @@ void DisplayManager::drawCard(int x, int y, int w, int h, uint16_t bgColor) {
 }
 
 void DisplayManager::drawBluetoothIcon(int x, int y, uint16_t color, bool filled) {
-  // Icona Bluetooth stilizzata più riconoscibile (ottimizzata per ICON_SIZE 20)
-  int centerX = x + ICON_SIZE / 2;
-  int centerY = y + ICON_SIZE / 2;
+  // Icona Bluetooth standard (ottimizzata per ICON_SIZE 20)
+  // Simbolo Bluetooth: due triangoli che formano una "B" stilizzata
+  int centerX = x + ICON_SIZE / 2;  // x + 10
+  int centerY = y + ICON_SIZE / 2;  // y + 10
   
   if (filled) {
-    // Disegna simbolo Bluetooth riempito (simbolo B stilizzato)
-    // Parte superiore sinistra
-    tft.fillTriangle(centerX - 3, y + 2, centerX - 6, y + 5, centerX, y + 5, color);
-    // Parte superiore destra
-    tft.fillTriangle(centerX + 3, y + 2, centerX + 6, y + 5, centerX, y + 5, color);
-    // Parte centrale (barra verticale)
-    tft.fillRect(centerX - 1, y + 5, 2, 8, color);
-    // Parte inferiore sinistra
-    tft.fillTriangle(centerX - 3, y + 15, centerX - 6, y + 12, centerX, y + 12, color);
-    // Parte inferiore destra
-    tft.fillTriangle(centerX + 3, y + 15, centerX + 6, y + 12, centerX, y + 12, color);
+    // Disegna simbolo Bluetooth riempito
+    // Triangolo superiore sinistro (punta verso il basso)
+    tft.fillTriangle(centerX - 2, y + 3, centerX - 6, y + 7, centerX, y + 7, color);
+    // Triangolo superiore destro (punta verso il basso)
+    tft.fillTriangle(centerX + 2, y + 3, centerX + 6, y + 7, centerX, y + 7, color);
+    // Barra verticale centrale
+    tft.fillRect(centerX - 1, y + 7, 2, 6, color);
+    // Triangolo inferiore sinistro (punta verso l'alto)
+    tft.fillTriangle(centerX - 2, y + 17, centerX - 6, y + 13, centerX, y + 13, color);
+    // Triangolo inferiore destro (punta verso l'alto)
+    tft.fillTriangle(centerX + 2, y + 17, centerX + 6, y + 13, centerX, y + 13, color);
   } else {
-    // Disegna solo contorno
-    tft.drawTriangle(centerX - 3, y + 2, centerX - 6, y + 5, centerX, y + 5, color);
-    tft.drawTriangle(centerX + 3, y + 2, centerX + 6, y + 5, centerX, y + 5, color);
-    tft.drawRect(centerX - 1, y + 5, 2, 8, color);
-    tft.drawTriangle(centerX - 3, y + 15, centerX - 6, y + 12, centerX, y + 12, color);
-    tft.drawTriangle(centerX + 3, y + 15, centerX + 6, y + 12, centerX, y + 12, color);
+    // Disegna simbolo Bluetooth outline (più sottile e preciso)
+    // Triangolo superiore sinistro
+    tft.drawTriangle(centerX - 2, y + 3, centerX - 6, y + 7, centerX, y + 7, color);
+    // Triangolo superiore destro
+    tft.drawTriangle(centerX + 2, y + 3, centerX + 6, y + 7, centerX, y + 7, color);
+    // Barra verticale centrale (linee invece di rettangolo per essere più sottile)
+    tft.drawLine(centerX, y + 7, centerX, y + 13, color);
+    // Triangolo inferiore sinistro
+    tft.drawTriangle(centerX - 2, y + 17, centerX - 6, y + 13, centerX, y + 13, color);
+    // Triangolo inferiore destro
+    tft.drawTriangle(centerX + 2, y + 17, centerX + 6, y + 13, centerX, y + 13, color);
   }
 }
 
@@ -367,25 +396,11 @@ void DisplayManager::drawConnectionStatus(bool bleEnabled, bool deviceConnected)
     iconColor = COLOR_SUCCESS;
     statusText = "Connesso";
     statusSubtext = "Tracking";
-    
-    // Animazione heartbeat pulsante
-    unsigned long currentTime = millis();
-    if (currentTime - lastHeartbeat >= HEARTBEAT_INTERVAL) {
-      heartbeatState = !heartbeatState;
-      lastHeartbeat = currentTime;
-    }
   } else if (bleEnabled) {
     // Stato: In attesa
     iconColor = COLOR_WARNING;
     statusText = "In attesa";
     statusSubtext = "Ricerca";
-    
-    // Animazione ricerca (punti)
-    unsigned long currentTime = millis();
-    if (currentTime - lastSearchDot >= SEARCH_DOT_INTERVAL) {
-      searchDotCount = (searchDotCount + 1) % 4;
-      lastSearchDot = currentTime;
-    }
   } else {
     // Stato: Inattivo
     iconColor = COLOR_INACTIVE;
@@ -405,7 +420,7 @@ void DisplayManager::drawConnectionStatus(bool bleEnabled, bool deviceConnected)
   tft.setCursor(textX, CARD_CONN_Y + 8);
   tft.print(statusText);
   
-  // Sottotesto
+  // Sottotesto (verrà aggiornato dalle funzioni di animazione se necessario)
   tft.setTextSize(1);
   tft.setTextColor(COLOR_TEXT_SECONDARY);
   tft.setCursor(textX, CARD_CONN_Y + 20);
@@ -436,37 +451,42 @@ void DisplayManager::drawConnectionStatus(bool bleEnabled, bool deviceConnected)
 }
 
 void DisplayManager::drawCountdown(bool bleEnabled, unsigned long timeToSleep) {
-  // Pulisci area countdown
-  tft.fillRect(CARD_MARGIN, COUNTDOWN_Y, DISPLAY_WIDTH - (CARD_MARGIN * 2), COUNTDOWN_HEIGHT, COLOR_BG_DARK);
+  bool countdownVisible = (!bleEnabled && timeToSleep <= COUNTDOWN_THRESHOLD && timeToSleep > 0);
   
-  // Mostra countdown solo se BLE è disabilitato e siamo negli ultimi 10 secondi
-  if (!bleEnabled && timeToSleep <= COUNTDOWN_THRESHOLD && timeToSleep > 0) {
-    // Icona sleep a sinistra (ridotta)
-    int iconSize = 16;
-    int iconX = CARD_MARGIN + 2;
-    int iconY = COUNTDOWN_Y + 1;
-    drawSleepIcon(iconX, iconY, COLOR_WARNING);
+  // Se il countdown è appena apparso o scomparso, ridisegna tutto
+  if (countdownVisible != countdownWasVisible) {
+    // Pulisci area countdown
+    tft.fillRect(CARD_MARGIN, COUNTDOWN_Y, DISPLAY_WIDTH - (CARD_MARGIN * 2), COUNTDOWN_HEIGHT, COLOR_BG_DARK);
     
-    // Testo countdown (ridotto)
-    tft.setTextSize(1);
-    tft.setTextColor(COLOR_WARNING);
-    int textX = iconX + iconSize + 3;
-    unsigned long secondsLeft = (timeToSleep + 999) / 1000; // Arrotonda per eccesso
-    tft.setCursor(textX, COUNTDOWN_Y + 3);
-    tft.printf("Sleep %lus", secondsLeft);
+    if (countdownVisible) {
+      // Icona sleep a sinistra (ridotta)
+      int iconSize = 16;
+      int iconX = CARD_MARGIN + 2;
+      int iconY = COUNTDOWN_Y + 1;
+      drawSleepIcon(iconX, iconY, COLOR_WARNING);
+      
+      // Testo countdown iniziale
+      tft.setTextSize(1);
+      tft.setTextColor(COLOR_WARNING);
+      int textX = iconX + iconSize + 3;
+      unsigned long secondsLeft = (timeToSleep + 999) / 1000;
+      tft.setCursor(textX, COUNTDOWN_Y + 3);
+      tft.printf("Sleep %lus", secondsLeft);
+      
+      // Barra progresso iniziale
+      int barX = textX;
+      int barY = COUNTDOWN_Y + 11;
+      int barWidth = DISPLAY_WIDTH - barX - CARD_MARGIN - 2;
+      int barHeight = 5;
+      float progress = 1.0 - ((float)timeToSleep / (float)COUNTDOWN_THRESHOLD);
+      if (progress < 0.0) progress = 0.0;
+      if (progress > 1.0) progress = 1.0;
+      uint16_t barColor = (timeToSleep < 3000) ? COLOR_ACCENT_ORANGE : COLOR_WARNING;
+      drawProgressBar(barX, barY, barWidth, barHeight, progress, barColor);
+    }
     
-    // Barra progresso migliorata
-    int barX = textX;
-    int barY = COUNTDOWN_Y + 11;
-    int barWidth = DISPLAY_WIDTH - barX - CARD_MARGIN - 2;
-    int barHeight = 5;
-    float progress = 1.0 - ((float)timeToSleep / (float)COUNTDOWN_THRESHOLD);
-    if (progress < 0.0) progress = 0.0;
-    if (progress > 1.0) progress = 1.0;
-    
-    // Colore barra cambia in base al tempo rimanente
-    uint16_t barColor = (timeToSleep < 3000) ? COLOR_ACCENT_ORANGE : COLOR_WARNING;
-    drawProgressBar(barX, barY, barWidth, barHeight, progress, barColor);
+    countdownWasVisible = countdownVisible;
+    lastCountdownUpdate = millis();
   }
 }
 
@@ -522,16 +542,171 @@ void DisplayManager::update(bool bleEnabled, bool deviceConnected, unsigned long
     drawHeader();
     drawFooter();
     uiNeedsRedraw = false;
+    // Reset stato per forzare ridisegno completo dopo redraw
+    lastBleEnabled = !bleEnabled;  // Forza cambiamento
+    lastDeviceConnected = !deviceConnected;  // Forza cambiamento
+    lastTimeToSleep = timeToSleep + 1000;  // Forza cambiamento
+    countdownWasVisible = false;  // Reset countdown
   }
   
-  // Aggiorna solo le parti dinamiche
-  drawBLEStatus(bleEnabled);
-  drawConnectionStatus(bleEnabled, deviceConnected);
-  drawCountdown(bleEnabled, timeToSleep);
+  // ========== OTTIMIZZAZIONE REFRESH: Aggiorna solo se necessario ==========
+  
+  // Salva valori precedenti per confronti (prima di aggiornarli)
+  bool bleChanged = (bleEnabled != lastBleEnabled);
+  bool deviceChanged = (deviceConnected != lastDeviceConnected);
+  
+  // Refresh BLE Status solo se bleEnabled è cambiato
+  if (bleChanged) {
+    drawBLEStatus(bleEnabled);
+    lastBleEnabled = bleEnabled;
+  }
+  
+  // Refresh Connection Status solo se stato è cambiato OPPURE se ci sono animazioni attive
+  bool connectionStateChanged = bleChanged || deviceChanged;
+  bool needsAnimationUpdate = false;
+  
+  if (deviceConnected) {
+    // Animazione heartbeat: aggiorna ogni HEARTBEAT_INTERVAL
+    if (currentTime - lastHeartbeat >= HEARTBEAT_INTERVAL) {
+      heartbeatState = !heartbeatState;
+      lastHeartbeat = currentTime;
+      needsAnimationUpdate = true;
+    }
+  } else if (bleEnabled) {
+    // Animazione search dots: aggiorna ogni SEARCH_DOT_INTERVAL
+    if (currentTime - lastSearchDot >= SEARCH_DOT_INTERVAL) {
+      searchDotCount = (searchDotCount + 1) % 4;
+      lastSearchDot = currentTime;
+      needsAnimationUpdate = true;
+    }
+  }
+  
+  // Aggiorna connection status se stato cambiato OPPURE se animazione richiede update
+  if (connectionStateChanged || needsAnimationUpdate) {
+    if (connectionStateChanged) {
+      // Ridisegna completo se stato cambiato
+      drawConnectionStatus(bleEnabled, deviceConnected);
+    } else {
+      // Aggiorna solo animazione se solo quella è cambiata
+      if (deviceConnected) {
+        updateHeartbeatText();
+      } else if (bleEnabled) {
+        updateSearchDots();
+      }
+    }
+    lastBleEnabled = bleEnabled;
+    lastDeviceConnected = deviceConnected;
+  }
+  
+  // Refresh Countdown solo se necessario
+  bool countdownVisible = (!bleEnabled && timeToSleep <= COUNTDOWN_THRESHOLD && timeToSleep > 0);
+  bool countdownStateChanged = (countdownVisible != countdownWasVisible);
+  bool countdownTimeChanged = false;
+  
+  if (countdownVisible) {
+    // Aggiorna countdown ogni secondo quando visibile
+    unsigned long secondsLeft = (timeToSleep + 999) / 1000;
+    unsigned long lastSecondsLeft = (lastTimeToSleep + 999) / 1000;
+    countdownTimeChanged = (secondsLeft != lastSecondsLeft) || (currentTime - lastCountdownUpdate >= 1000);
+  }
+  
+  if (countdownStateChanged || countdownTimeChanged) {
+    if (countdownStateChanged) {
+      // Ridisegna completo se countdown appare/scompare
+      drawCountdown(bleEnabled, timeToSleep);
+    } else {
+      // Aggiorna solo testo e progress bar se solo tempo cambiato
+      updateCountdownText(timeToSleep);
+      updateCountdownProgress(timeToSleep);
+      lastCountdownUpdate = currentTime;
+    }
+    lastTimeToSleep = timeToSleep;
+  }
 }
 
 void DisplayManager::requestRedraw() {
   uiNeedsRedraw = true;
+}
+
+// ========== FUNZIONI HELPER PER REFRESH PARZIALI (OTTIMIZZAZIONE ANIMAZIONI) ==========
+
+void DisplayManager::updateHeartbeatText() {
+  // Aggiorna solo il testo heartbeat senza ridisegnare tutta la card
+  int iconX = CARD_MARGIN + CARD_PADDING;
+  int textX = iconX + ICON_SIZE + 4;
+  
+  // Pulisci solo area testo sottotesto (larghezza sufficiente per "Tracking" + spazi)
+  tft.fillRect(textX, CARD_CONN_Y + 20, 60, 10, COLOR_BG_CARD);
+  
+  // Ridisegna sottotesto con animazione heartbeat
+  tft.setTextSize(1);
+  tft.setTextColor(COLOR_TEXT_SECONDARY);
+  tft.setCursor(textX, CARD_CONN_Y + 20);
+  tft.print("Tracking");
+  if (heartbeatState) {
+    tft.print("  ");
+  }
+}
+
+void DisplayManager::updateSearchDots() {
+  // Aggiorna solo i punti di ricerca senza ridisegnare tutta la card
+  int iconX = CARD_MARGIN + CARD_PADDING;
+  int textX = iconX + ICON_SIZE + 4;
+  
+  // Pulisci area sottotesto (incluso testo "Ricerca" + punti)
+  // "Ricerca" è 7 caratteri, quindi circa 42 pixel + spazio per 3 punti
+  tft.fillRect(textX, CARD_CONN_Y + 20, 60, 10, COLOR_BG_CARD);
+  
+  // Ridisegna testo completo con punti
+  tft.setTextSize(1);
+  tft.setTextColor(COLOR_TEXT_SECONDARY);
+  tft.setCursor(textX, CARD_CONN_Y + 20);
+  tft.print("Ricerca");
+  for (int i = 0; i < searchDotCount; i++) {
+    tft.print(".");
+  }
+  for (int i = searchDotCount; i < 3; i++) {
+    tft.print(" ");
+  }
+}
+
+void DisplayManager::updateCountdownText(unsigned long timeToSleep) {
+  // Aggiorna solo il testo del countdown senza ridisegnare tutto
+  int iconSize = 16;
+  int iconX = CARD_MARGIN + 2;
+  int textX = iconX + iconSize + 3;
+  
+  // Pulisci solo area testo countdown
+  tft.fillRect(textX, COUNTDOWN_Y + 3, 50, 8, COLOR_BG_DARK);
+  
+  // Ridisegna testo countdown
+  tft.setTextSize(1);
+  tft.setTextColor(COLOR_WARNING);
+  unsigned long secondsLeft = (timeToSleep + 999) / 1000;
+  tft.setCursor(textX, COUNTDOWN_Y + 3);
+  tft.printf("Sleep %lus", secondsLeft);
+}
+
+void DisplayManager::updateCountdownProgress(unsigned long timeToSleep) {
+  // Aggiorna solo la progress bar senza ridisegnare tutto
+  int iconSize = 16;
+  int iconX = CARD_MARGIN + 2;
+  int textX = iconX + iconSize + 3;
+  int barX = textX;
+  int barY = COUNTDOWN_Y + 11;
+  int barWidth = DISPLAY_WIDTH - barX - CARD_MARGIN - 2;
+  int barHeight = 5;
+  
+  // Calcola progress
+  float progress = 1.0 - ((float)timeToSleep / (float)COUNTDOWN_THRESHOLD);
+  if (progress < 0.0) progress = 0.0;
+  if (progress > 1.0) progress = 1.0;
+  
+  // Colore barra cambia in base al tempo rimanente
+  uint16_t barColor = (timeToSleep < 3000) ? COLOR_ACCENT_ORANGE : COLOR_WARNING;
+  
+  // Ridisegna solo progress bar
+  drawProgressBar(barX, barY, barWidth, barHeight, progress, barColor);
 }
 
 #endif // DISPLAY_MANAGER_H
