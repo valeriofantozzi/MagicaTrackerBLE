@@ -33,10 +33,12 @@ Il **LILYGO T-Display** è una scheda di sviluppo ESP32 con display TFT integrat
 
 - **Tipo**: IPS ST7789V TFT LCD
 - **Dimensione**: 1.14 pollici
-- **Risoluzione**: 135 × 240 pixel
+- **Risoluzione**: 135 × 240 pixel (altezza × larghezza)
 - **Densità pixel**: 260 PPI
 - **Interfaccia**: 4-Wire SPI
 - **Controller**: ST7789
+- **Orientamento**: Verticale (portrait) di default
+- **Colori**: RGB565 (16-bit, 65.536 colori)
 
 ### Connettività Wireless
 
@@ -236,18 +238,20 @@ String getChargingStatus() {
 ### Interfaccia Display TFT
 
 ```
-TFT_MOSI: GPIO 19
-TFT_SCLK: GPIO 18
-TFT_CS:   GPIO 5
-TFT_DC:   GPIO 16
-TFT_RST:  GPIO 23 (alcune versioni) / N/A (altre versioni)
-TFT_BL:   GPIO 4
+TFT_MOSI: GPIO 19  // Master Out Slave In (SPI Data)
+TFT_SCLK: GPIO 18  // Serial Clock (SPI Clock)
+TFT_CS:   GPIO 5   // Chip Select
+TFT_DC:   GPIO 16  // Data/Command
+TFT_RST:  GPIO 23  // Reset (versione v2+) / N/A (versione v1)
+TFT_BL:   GPIO 4   // Backlight control (PWM opzionale)
 ```
 
 **⚠️ Nota Versioni**: Il pin TFT_RST può variare tra versioni:
 
-- **Versione con TFT_RST connesso**: GPIO 23
-- **Versione senza TFT_RST**: N/A (non connesso)
+- **Versione v1 (senza TFT_RST)**: Non connesso, usare `-1` nel codice
+- **Versione v2+ (con TFT_RST)**: GPIO 23 (come nel template)
+
+**Template di riferimento**: Il template usa `TFT_RST = 23`, quindi è per versione **v2+** con pin RST connesso.
 
 ### Pulsanti
 
@@ -276,8 +280,22 @@ TFT_BL:   GPIO 4
 
 ### Librerie Richieste (Arduino)
 
-- **TFT_eSPI**: Per il controllo del display
-- **Adafruit_GFX**: Libreria grafica base
+#### Opzione 1: Librerie Adafruit (Raccomandato per semplicità)
+
+- **Adafruit_GFX**: Libreria grafica base (core graphics library)
+- **Adafruit_ST7789**: Libreria hardware-specific per controller ST7789
+- **SPI**: Libreria SPI standard (inclusa in Arduino)
+- **ESP32 Board Support**: Pacchetto ESP32 per Arduino
+
+**Installazione**:
+- Installa da Library Manager: `Adafruit GFX Library` e `Adafruit ST7789 Library`
+- Oppure da GitHub:
+  - https://github.com/adafruit/Adafruit-GFX-Library
+  - https://github.com/adafruit/Adafruit_ST7789_Library
+
+#### Opzione 2: Libreria TFT_eSPI (Alternativa)
+
+- **TFT_eSPI**: Libreria completa per display TFT (richiede configurazione manuale)
 - **ESP32 Board Support**: Pacchetto ESP32 per Arduino
 
 ### Configurazione Arduino IDE
@@ -298,6 +316,163 @@ TFT_BL:   GPIO 4
    Core Debug Level: None
    PSRAM: Disabled
    ```
+
+## 🖥️ Configurazione e Utilizzo Display
+
+### Template TTGO T-Display con Librerie Adafruit
+
+Il template di riferimento utilizza le librerie **Adafruit_GFX** e **Adafruit_ST7789**, che sono più semplici da configurare rispetto a TFT_eSPI.
+
+#### Pinout Display (dal Template)
+
+```cpp
+#define TFT_MOSI 19  // Master Out Slave In (SPI Data)
+#define TFT_SCLK 18  // Serial Clock (SPI Clock)
+#define TFT_CS   5   // Chip Select
+#define TFT_DC   16  // Data/Command
+#define TFT_RST  23  // Reset (versione con RST connesso)
+#define TFT_BL   4   // Backlight control
+```
+
+**⚠️ Nota**: Il template usa `TFT_RST = 23`, quindi è per una versione **CON** pin RST connesso (v2+).
+
+#### Inizializzazione Display (Adafruit)
+
+```cpp
+#include <Adafruit_GFX.h>    // Core graphics library
+#include <Adafruit_ST7789.h> // Hardware-specific library for ST7789
+#include <SPI.h>
+
+// Constructor per display object
+Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
+
+void setup() {
+  // Inizializza backlight (IMPORTANTE!)
+  pinMode(TFT_BL, OUTPUT);
+  digitalWrite(TFT_BL, HIGH);  // Accendi backlight
+  
+  // Inizializza display: tft.init(altezza, larghezza)
+  tft.init(135, 240);  // 135 pixel altezza, 240 pixel larghezza
+  
+  // Configurazione iniziale
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(3);
+}
+```
+
+#### Funzioni Principali Display
+
+**Disegno Testo**:
+```cpp
+tft.setCursor(x, y);              // Posiziona cursore
+tft.setTextColor(colore);          // Colore testo
+tft.setTextColor(colore, bg);     // Colore testo e background
+tft.setTextSize(dimensione);       // Dimensione testo (1-10)
+tft.print("Testo");                // Stampa testo
+tft.println("Testo");              // Stampa testo con newline
+```
+
+**Disegno Grafica**:
+```cpp
+tft.fillScreen(colore);            // Riempie schermo con colore
+tft.fillRect(x, y, w, h, colore);  // Rettangolo pieno
+tft.drawRect(x, y, w, h, colore);  // Rettangolo vuoto
+tft.drawLine(x1, y1, x2, y2, colore); // Linea
+tft.drawCircle(x, y, r, colore);   // Cerchio
+tft.fillCircle(x, y, r, colore);  // Cerchio pieno
+```
+
+**Colori Predefiniti**:
+```cpp
+ST77XX_BLACK    // Nero
+ST77XX_WHITE    // Bianco
+ST77XX_RED      // Rosso
+ST77XX_GREEN    // Verde
+ST77XX_BLUE     // Blu
+ST77XX_CYAN     // Cyan
+ST77XX_MAGENTA  // Magenta
+ST77XX_YELLOW   // Giallo
+```
+
+**Colori Personalizzati RGB565**:
+```cpp
+// Formato RGB565: 5 bit rosso, 6 bit verde, 5 bit blu
+uint16_t colore = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+// Esempio: rosso puro
+uint16_t rosso = 0xF800;  // 11111 000000 00000
+```
+
+#### Conversione HSV a RGB565
+
+Il template include una funzione per convertire colori HSV (Hue, Saturation, Value) in RGB565:
+
+```cpp
+// Hue: 0-255 (mappa a 0-360 gradi)
+// Saturation: 0-255 (0 = scala grigi, 255 = colore pieno)
+// Value: 0-255 (0 = nero, 255 = luminosità massima)
+uint16_t hsvToRgb565(uint8_t h, uint8_t s, uint8_t v) {
+  // Implementazione completa nel template
+  // Restituisce colore RGB565
+}
+```
+
+**Esempio utilizzo**:
+```cpp
+uint8_t hue = 0;  // Inizia da rosso
+uint16_t rainbowColor = hsvToRgb565(hue, 255, 255);  // Colore pieno
+tft.fillScreen(rainbowColor);
+```
+
+#### Gestione Backlight
+
+Il backlight è controllato manualmente su GPIO 4:
+
+```cpp
+// Accendi backlight
+pinMode(TFT_BL, OUTPUT);
+digitalWrite(TFT_BL, HIGH);
+
+// Spegni backlight (risparmio energetico)
+digitalWrite(TFT_BL, LOW);
+
+// PWM per controllo luminosità (opzionale)
+analogWrite(TFT_BL, 128);  // Luminosità al 50%
+```
+
+**⚠️ IMPORTANTE**: 
+- Il backlight deve essere acceso **prima** di inizializzare il display
+- Spegnere il backlight durante deep sleep riduce il consumo energetico
+
+#### Risoluzione e Orientamento
+
+- **Risoluzione**: 135 × 240 pixel (altezza × larghezza)
+- **Orientamento default**: Verticale (portrait)
+- **Coordinate**: (0,0) in alto a sinistra
+- **Range X**: 0-239 (larghezza)
+- **Range Y**: 0-134 (altezza)
+
+**Nota**: La funzione `tft.init(135, 240)` accetta parametri come `(altezza, larghezza)`, non `(larghezza, altezza)`.
+
+#### Performance e Ottimizzazioni
+
+- **Refresh rate**: ~30-60 FPS per animazioni semplici
+- **Fill screen**: ~16ms per schermo completo
+- **Testo**: ~1-2ms per carattere (dipende da dimensione)
+- **Consiglio**: Minimizzare `fillScreen()` per animazioni fluide
+
+**Esempio ottimizzato**:
+```cpp
+// Invece di:
+tft.fillScreen(colore);
+tft.setCursor(x, y);
+tft.print("Testo");
+
+// Usa:
+tft.setTextColor(ST77XX_WHITE, colore);  // Colore testo e background
+tft.setCursor(x, y);
+tft.print("Testo");  // Disegna solo testo, non riempie tutto lo schermo
+```
 
 ### Configurazione TFT_eSPI
 
@@ -388,19 +563,70 @@ Per utilizzare correttamente la libreria TFT_eSPI, è necessario modificare il f
 ### Problemi Comuni
 
 1. **Upload fallito**: Verificare la modalità boot (premere BOOT durante upload)
-2. **Display nero**: Controllare connessione TFT_BL (GPIO 4)
-3. **WiFi instabile**: Verificare alimentazione adeguata
-4. **Pulsanti non funzionanti**: Controllare pull-up/down resistors
+2. **Display nero**: 
+   - Controllare che backlight sia acceso: `digitalWrite(TFT_BL, HIGH)`
+   - Verificare che `tft.init()` sia chiamato dopo aver acceso backlight
+   - Controllare connessione TFT_BL (GPIO 4)
+3. **Display mostra solo colori**: Verificare che `tft.init(135, 240)` usi parametri corretti (altezza, larghezza)
+4. **Testo non visibile**: Verificare contrasto tra colore testo e background
+5. **WiFi instabile**: Verificare alimentazione adeguata
+6. **Pulsanti non funzionanti**: Controllare pull-up/down resistors
+7. **Errore compilazione librerie Adafruit**: Verificare che siano installate sia `Adafruit_GFX` che `Adafruit_ST7789`
 
 ### Compatibilità
 
 - **Arduino IDE**: Versione 1.8.10+
 - **ESP32 Board Package**: Versione 1.0.6+
-- **TFT_eSPI**: Versione 2.4.0+
+- **TFT_eSPI**: Versione 2.4.0+ (se usata)
+- **Adafruit_GFX**: Versione 1.11.0+
+- **Adafruit_ST7789**: Versione 1.9.0+
 
 ## 🔧 Esempi di Codice
 
-### Esempio Base Display
+### Esempio Base Display con Adafruit (Template)
+
+```cpp
+#include <Adafruit_GFX.h>
+#include <Adafruit_ST7789.h>
+#include <SPI.h>
+
+#define TFT_MOSI 19
+#define TFT_SCLK 18
+#define TFT_CS 5
+#define TFT_DC 16
+#define TFT_RST 23
+#define TFT_BL 4
+
+Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
+
+void setup() {
+  Serial.begin(9600);
+  
+  // Inizializza backlight
+  pinMode(TFT_BL, OUTPUT);
+  digitalWrite(TFT_BL, HIGH);
+  
+  // Inizializza display
+  tft.init(135, 240);
+  
+  // Configurazione iniziale
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(3);
+  
+  // Disegna testo
+  tft.setCursor(20, 50);
+  tft.println("Hello");
+  tft.setCursor(20, 85);
+  tft.println("World!");
+}
+
+void loop() {
+  // Codice principale
+}
+```
+
+### Esempio Base Display con TFT_eSPI
 
 ```cpp
 #include <TFT_eSPI.h>

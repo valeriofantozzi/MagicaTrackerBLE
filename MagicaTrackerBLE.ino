@@ -10,7 +10,10 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
-#include <Button.h>
+#include "Button2.h"
+
+// ========== DISPLAY INCLUDES ==========
+#include "DisplayManager.h"
 
 // ========== DEEP SLEEP INCLUDES ==========
 #include "driver/rtc_io.h"  // Per RTC GPIO control
@@ -27,17 +30,19 @@
 
 // Pin pulsanti LILYGO T-Display
 #define BUTTON1_PIN 35  // Toggle BLE service
-#define BUTTON2_PIN 0   // Disponibile per altre funzioni
+#define BUTTON2_PIN 0   // Toggle deep sleep
 
-// Istanza libreria Button
-Button button1(BUTTON1_PIN);
-Button button2(BUTTON2_PIN);
+// Istanza libreria Button2
+Button2 button1, button2;
 
 // ========== VARIABILI GLOBALI ==========
 
 BLEServer* pServer = NULL;
 bool deviceConnected = false;
 bool bleEnabled = false;  // Stato del servizio BLE (inizialmente disabilitato)
+
+// ========== DISPLAY MANAGER ==========
+DisplayManager displayManager;
 
 // ========== DEEP SLEEP VARIABILI ==========
 RTC_DATA_ATTR bool deepSleepMode = false;  // Stato persistente attraverso deep sleep
@@ -54,11 +59,13 @@ bool countdownActive = false;       // Flag per countdown attivo
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
       deviceConnected = true;
+      displayManager.requestRedraw();  // Aggiorna UI
       Serial.println("CONNESSO - Tracking attivo");
     }
 
     void onDisconnect(BLEServer* pServer) {
       deviceConnected = false;
+      displayManager.requestRedraw();  // Aggiorna UI
       Serial.println("DISCONNESSO - Riavvio advertising");
       delay(500);
       pServer->startAdvertising();
@@ -107,6 +114,7 @@ void enableBLE() {
   BLEDevice::startAdvertising();
 
   bleEnabled = true;
+  displayManager.requestRedraw();  // Aggiorna UI
   Serial.println("✓ BLE attivo e visibile");
   Serial.println("✓ In attesa connessione Magica...\n");
 }
@@ -126,12 +134,16 @@ void disableBLE() {
   }
 
   bleEnabled = false;
+  displayManager.requestRedraw();  // Aggiorna UI
   Serial.println("✓ BLE disabilitato - Pronto per deep sleep\n");
 }
 
 // ========== NUOVA IMPLEMENTAZIONE DEEP SLEEP ==========
 void enterDeepSleep() {
   Serial.println("🔋 Entrando in DEEP SLEEP per risparmio energetico...");
+  
+  // IMPORTANTE: Spegni display prima di deep sleep
+  displayManager.turnOff();
 
   // Verifica che GPIO 0 sia valido per RTC wake up
   if (!esp_sleep_is_valid_wakeup_gpio(GPIO_NUM_0)) {
@@ -145,12 +157,11 @@ void enterDeepSleep() {
   // IMPORTANTE: Prima configura il pin come input con pull-up per stabilità
   pinMode(BUTTON2_PIN, INPUT_PULLUP);
 
-  // Breve delay per stabilizzare il pin
-  delay(10);
+  // Breve delay per stabilizzare il pin (ridotto al minimo necessario)
+  delay(5);
 
-  // DEBUG: Verifica stato pin prima di configurare wake up
+  // Verifica stato pin prima di configurare wake up
   int pinState = digitalRead(BUTTON2_PIN);
-  Serial.printf("🔍 Stato GPIO 0 prima del deep sleep: %d (dovrebbe essere 1 = HIGH)\n", pinState);
 
   // Sicurezza: se il pin è già LOW, non entrare in deep sleep per evitare loop
   if (pinState == LOW) {
@@ -176,6 +187,55 @@ void enterDeepSleep() {
 
   // Questa linea non verrà mai eseguita
   Serial.println("ERRORE: Uscito da deep sleep senza wake up!");
+}
+
+// ========== BUTTON HANDLERS ==========
+
+// Handler per BUTTON1: Toggle BLE advertising
+void handleButton1Tap(Button2& btn) {
+  // Tap handler come fallback se Button2 chiama tap invece di click
+  handleButton1Click(btn);
+}
+
+void handleButton1Click(Button2& btn) {
+  unsigned long currentTime = millis();
+  lastActivityTime = currentTime;  // Reset timer attività
+  countdownActive = false;         // Reset countdown
+
+  if (bleEnabled) {
+    // Disabilita BLE advertising
+    Serial.println("🔄 BUTTON1: BLE attivo → BLE disabilitato");
+    disableBLE();
+  } else {
+    // Abilita BLE advertising
+    Serial.println("🔄 BUTTON1: BLE disabilitato → BLE attivo");
+    enableBLE();
+  }
+  
+  displayManager.requestRedraw();  // Aggiorna UI
+}
+
+// Handler per BUTTON2: Entra in deep sleep
+void handleButton2Click(Button2& btn) {
+  unsigned long currentTime = millis();
+  lastActivityTime = currentTime;  // Reset timer attività
+  countdownActive = false;         // Reset countdown
+
+  // BUTTON2 può sempre entrare in deep sleep
+  Serial.println("🔄 BUTTON2: Entrando in DEEP SLEEP");
+
+  // Se BLE è attivo, disabilitalo prima
+  if (bleEnabled) {
+    disableBLE();
+  }
+
+  // Attendi che il pulsante venga rilasciato per evitare wake up immediato
+  Serial.println("🔍 Attendo rilascio pulsante BUTTON2...");
+  while (digitalRead(BUTTON2_PIN) == LOW) {
+    delay(1);  // Delay minimo solo per non saturare la CPU (debounce gestito da Button2)
+  }
+
+  enterDeepSleep();  // Vai in deep sleep (displayManager.turnOff() chiamato dentro)
 }
 
 // ========== HELPER FUNCTIONS DEEP SLEEP ==========
@@ -204,7 +264,7 @@ void print_wakeup_reason() {
 
 void setup() {
   Serial.begin(115200);
-  delay(1000);  // Tempo per aprire Serial Monitor
+  delay(500);  // Tempo ridotto per aprire Serial Monitor (era 1000ms)
 
   bootCount++;
   Serial.printf("\n=== ESP32 BLE Tracker per Magica - Boot #%d ===\n", bootCount);
@@ -217,29 +277,81 @@ void setup() {
 
   // Gestione wake up da deep sleep
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0) {
-    Serial.println("✅ Svegliato da BUTTON1 - Uscita da DEEP SLEEP");
+    Serial.println("✅ Svegliato da BUTTON2 - Uscita da DEEP SLEEP");
     deepSleepMode = false;  // Reset stato deep sleep
     lastActivityTime = millis();  // Reset timer attività dopo wake up
+    
+    // IMPORTANTE: Reset configurazione GPIO 0 dopo wake-up da deep sleep
+    // Il pin potrebbe essere ancora configurato come RTC GPIO
+    rtc_gpio_deinit(GPIO_NUM_0);  // Deinizializza RTC GPIO
+    delay(50);  // Delay per stabilizzare il pin
+    
+    // Riconfigura come INPUT_PULLUP normale
+    pinMode(BUTTON2_PIN, INPUT_PULLUP);
+    delay(50);  // Delay aggiuntivo per stabilizzare
+    
+    // Se il pulsante è ancora premuto, attendi il rilascio
+    if (digitalRead(BUTTON2_PIN) == LOW) {
+      unsigned long waitStart = millis();
+      while (digitalRead(BUTTON2_PIN) == LOW && (millis() - waitStart) < 2000) {
+        delay(10);
+      }
+    }
+    
+    // Riaccendi display dopo wake up
+    displayManager.turnOn();
+    displayManager.init();
   } else if (deepSleepMode) {
     Serial.println("⚠️  Stato deep sleep attivo ma nessuna causa wake up valida");
     Serial.println("🔄 Possibile wake up spontaneo - verificando stabilità pin...");
     deepSleepMode = false;  // Reset di sicurezza
     lastActivityTime = millis();  // Reset timer attività
+    // Riaccendi display
+    displayManager.turnOn();
+    displayManager.init();
   } else {
     // Avvio normale (non da deep sleep)
     lastActivityTime = millis();  // Inizializza timer attività
+    // Inizializza display per avvio normale
+    displayManager.init();
   }
 
   // Inizializza pulsanti solo se non siamo in deep sleep mode
   if (!deepSleepMode) {
-  button1.begin();
-  button2.begin();
-  Serial.println("✓ Pulsanti inizializzati");
+    // BUTTON1 (pin 35): Input-only pin, NON supporta INPUT_PULLUP interno
+    // Il pin 35 su ESP32 è ADC-only e richiede pull-up esterno sulla scheda
+    pinMode(BUTTON1_PIN, INPUT);  // Configura manualmente come INPUT
+    button1.begin(BUTTON1_PIN, INPUT, true);  // INPUT con activeLow=true
+    button1.setDebounceTime(50);  // 50ms per maggiore stabilità
+    button1.setDoubleClickTime(400);  // 400ms per distinguere click singolo da doppio
+    button1.setTapHandler(handleButton1Tap);  // Tap handler come fallback
+    button1.setClickHandler(handleButton1Click);
+    
+    // BUTTON2 (pin 0): Supporta INPUT_PULLUP (default)
+    // IMPORTANTE: Assicurati che il pin sia configurato correttamente prima di begin()
+    // Se viene da deep sleep, potrebbe essere ancora configurato come RTC GPIO
+    pinMode(BUTTON2_PIN, INPUT_PULLUP);  // Configura esplicitamente come INPUT_PULLUP
+    delay(10);  // Piccolo delay per stabilizzare
+    
+    button2.begin(BUTTON2_PIN);  // Usa default INPUT_PULLUP
+    delay(10);  // Delay dopo begin() per stabilizzare
+    
+    // Reset Button2 per assicurare stato pulito
+    button2.reset();
+    delay(10);
+    
+    button2.setDebounceTime(10);  // 10ms invece del default (solitamente 50ms)
+    button2.setClickHandler(handleButton2Click);
+    
+    Serial.println("✓ Pulsanti inizializzati");
     Serial.println("✓ BUTTON1 (pin 35): Toggle BLE advertising on/off");
     Serial.println("✓ BUTTON2 (pin 0): Toggle deep sleep on/off");
     Serial.println("✓ BLE inizialmente DISABILITATO (no advertising)");
     Serial.printf("✓ AUTO SLEEP: entra in deep sleep dopo %d secondi di inattività (solo se BLE disabilitato)\n", AUTO_SLEEP_TIMEOUT / 1000);
     Serial.println("✓ Nota: Solo BUTTON2 può svegliare dal deep sleep\n");
+    
+    // Disegna UI iniziale
+    displayManager.update(bleEnabled, deviceConnected, AUTO_SLEEP_TIMEOUT);
   } else {
     Serial.println("🔋 Modalità DEEP SLEEP attiva - Andando immediatamente in sleep...\n");
   }
@@ -255,47 +367,22 @@ void loop() {
   }
 
   unsigned long currentTime = millis();
-
-  // ========= GESTIONE PULSANTI SEPARATI ==========
-
-  // BUTTON1: Solo toggle BLE advertising (on/off)
-  if (button1.pressed()) {
-    lastActivityTime = currentTime;  // Reset timer attività
-    countdownActive = false;         // Reset countdown
-
-    if (bleEnabled) {
-      // Disabilita BLE advertising
-      Serial.println("🔄 BUTTON1: BLE attivo → BLE disabilitato");
-      disableBLE();
-    } else {
-      // Abilita BLE advertising
-      Serial.println("🔄 BUTTON1: BLE disabilitato → BLE attivo");
-      enableBLE();
-    }
+  
+  // Calcola tempo rimanente per auto sleep
+  unsigned long timeToSleep = 0;
+  if (!bleEnabled) {
+    unsigned long timeSinceActivity = currentTime - lastActivityTime;
+    timeToSleep = (timeSinceActivity < AUTO_SLEEP_TIMEOUT) ? 
+                   (AUTO_SLEEP_TIMEOUT - timeSinceActivity) : 0;
   }
+  
+  // Aggiorna UI continuamente
+  displayManager.update(bleEnabled, deviceConnected, timeToSleep);
 
-  // BUTTON2: Toggle deep sleep (entra/esci)
-  if (button2.pressed()) {
-    lastActivityTime = currentTime;  // Reset timer attività
-    countdownActive = false;         // Reset countdown
-
-    // BUTTON2 può sempre entrare in deep sleep
-    Serial.println("🔄 BUTTON2: Entrando in DEEP SLEEP");
-
-    // Se BLE è attivo, disabilitalo prima
-    if (bleEnabled) {
-      disableBLE();
-    }
-
-    // Attendi che il pulsante venga rilasciato per evitare wake up immediato
-    Serial.println("🔍 Attendo rilascio pulsante BUTTON2...");
-    while (digitalRead(BUTTON2_PIN) == LOW) {
-      delay(10);  // Piccolo delay per debounce
-    }
-    delay(100);  // Delay aggiuntivo per sicurezza
-
-    enterDeepSleep();  // Vai in deep sleep
-  }
+  // ========= GESTIONE PULSANTI CON BUTTON2 ==========
+  // I callback vengono chiamati automaticamente quando necessario
+  button1.loop();
+  button2.loop();
 
   // Controllo timeout auto sleep (solo se BLE è disabilitato)
   if (!bleEnabled && currentTime - lastActivityTime >= AUTO_SLEEP_TIMEOUT) {
@@ -334,5 +421,6 @@ void loop() {
     Serial.print(".");  // Heartbeat visivo
   }
 
-  delay(100);  // Piccolo delay per stabilità pulsanti
+  // Delay minimo solo per non saturare la CPU (debounce gestito da Button2)
+  delay(10);
 }
